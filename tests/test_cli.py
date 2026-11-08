@@ -151,3 +151,30 @@ def test_sql_replace_with_url_list(sample_tree, capsys, tmp_path):
 def test_sql_replace_nothing_to_do(uploads, capsys):
     save_jpeg(uploads / "a.jpg")
     assert main([str(uploads), "--sql-replace", "--site-url", "https://e.com"]) == 1
+
+
+def test_json_report_creates_missing_folders(sample_tree, tmp_path):
+    report = tmp_path / "reports" / "nested" / "r.json"
+    assert main([str(sample_tree), "--quiet", "--json-report", str(report)]) == 0
+    assert json.loads(report.read_text())["converted"] == 3
+
+
+def test_json_report_unwritable_path_fails_before_processing(sample_tree, tmp_path, capsys):
+    target = tmp_path / "a-directory"
+    target.mkdir()
+    assert main([str(sample_tree), "--quiet", "--json-report", str(target)]) == 2
+    assert "cannot write --json-report" in capsys.readouterr().err
+    assert not list(sample_tree.rglob("*.webp"))  # nothing was converted
+
+
+def test_json_report_parent_is_a_file(sample_tree, tmp_path, capsys):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x")
+    assert main([str(sample_tree), "--quiet", "--json-report", str(blocker / "r.json")]) == 2
+    assert not list(sample_tree.rglob("*.webp"))
+
+
+def test_failed_run_leaves_no_probe_file(tmp_path):
+    report = tmp_path / "r.json"
+    assert main([str(tmp_path / "nope"), "--quiet", "--json-report", str(report)]) == 2
+    assert not report.exists()

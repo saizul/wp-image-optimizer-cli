@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `--json-report` creates missing parent folders and checks the path before processing starts, so a bad path exits with code 2 and a message instead of a traceback after a long run.
+
 ## [1.0.0] - 2026-11-08
 
 ### Added

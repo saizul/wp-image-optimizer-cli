@@ -176,6 +176,22 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
+    report_existed = bool(args.json_report and args.json_report.exists())
+    if args.json_report:
+        # Fail before a long run, not after it: create the folder and prove the path is writable.
+        try:
+            args.json_report.parent.mkdir(parents=True, exist_ok=True)
+            if args.json_report.is_dir():
+                raise IsADirectoryError(21, "is a directory")
+            with args.json_report.open("a", encoding="utf-8"):
+                pass
+        except OSError as exc:
+            err.print(
+                f"[red]error:[/red] cannot write --json-report {args.json_report}: {exc.strerror}",
+                highlight=False,
+            )
+            return 2
+
     show_progress = not args.quiet and sys.stderr.isatty()
     try:
         if show_progress:
@@ -196,13 +212,22 @@ def main(argv: list[str] | None = None) -> int:
         else:
             summary = run(args.root, options)
     except OptimizerError as exc:
+        if args.json_report and not report_existed:
+            args.json_report.unlink(missing_ok=True)  # drop the empty probe file
         err.print(f"[red]error:[/red] {exc}", highlight=False)
         return 2
 
     if args.json_report:
-        args.json_report.write_text(
-            json.dumps(summary.to_dict(), indent=2) + "\n", encoding="utf-8"
-        )
+        try:
+            args.json_report.write_text(
+                json.dumps(summary.to_dict(), indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            err.print(
+                f"[red]error:[/red] cannot write --json-report {args.json_report}: {exc.strerror}",
+                highlight=False,
+            )
+            return 2
     if not args.quiet:
         render_summary(summary, out)
     return 1 if summary.errors else 0
