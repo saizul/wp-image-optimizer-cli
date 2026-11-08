@@ -93,7 +93,7 @@ Running the same command again reports everything as "Already up to date".
 | `-n, --dry-run` | off | analyse only; writes no images and no manifest |
 | `--force` | off | ignore timestamps and manifest |
 | `--no-manifest`, `--manifest PATH` | on | manifest handling |
-| `--json-report PATH` | none | write the full per-file report as JSON |
+| `--json-report PATH` | none | write the full per-file report as JSON; missing folders are created and an unwritable path is rejected (exit 2) before any image is processed |
 | `--quiet` | off | no progress or table |
 
 Exit codes: `0` success, `1` one or more files failed (or nothing to replace in
