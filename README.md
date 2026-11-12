@@ -30,6 +30,8 @@ touches your database unless you copy the printed commands yourself.
   browser's `Accept` header allows it
 - `--sql-replace` prints a reviewed list of `wp search-replace` commands for chosen
   image URLs, including the escaped-slash form Elementor stores in `_elementor_data`
+- `--find-orphans` lists `.webp` / `.avif` twins whose original was deleted from the
+  Media Library (plus temp files left by interrupted runs) and removes them with `--delete`
 
 ## Install
 
@@ -95,6 +97,9 @@ Running the same command again reports everything as "Already up to date".
 | `--no-manifest`, `--manifest PATH` | on | manifest handling |
 | `--json-report PATH` | none | write the full per-file report as JSON; missing folders are created and an unwritable path is rejected (exit 2) before any image is processed |
 | `--quiet` | off | no progress or table |
+| `--find-orphans` | off | list converted files whose source is gone (see below) |
+| `--delete` | off | with `--find-orphans`: remove orphans and stale temp files |
+| `--temp-min-age SECONDS` | 3600 | minimum age before a temp file counts as stale |
 
 Exit codes: `0` success, `1` one or more files failed (or nothing to replace in
 `--sql-replace`), `2` bad usage or configuration.
@@ -166,6 +171,31 @@ cache flushes (`wp elementor flush-css` with `--elementor`). Each command uses
 `--skip-columns=guid`, `--precise` (safe for serialized data) and `--report-changed-only`.
 Every argument is shell-quoted. Run the apply block only once: repeating it would turn
 `.jpg.webp` into `.jpg.webp.webp`.
+
+## Cleaning up orphaned WebP/AVIF files
+
+Deleting an image in the Media Library removes the original and its sizes, but WordPress
+does not know about `photo.jpg.webp`. `--find-orphans` walks the tree and reports:
+
+| Kind | Meaning | Deleted with `--delete` |
+| --- | --- | --- |
+| `orphan` | `photo.jpg.webp` / `.avif` exists but `photo.jpg` does not | yes |
+| `stale-temp` | `.photo.jpg.webp.<pid>.<tid>.tmp` left by a killed run, older than `--temp-min-age` (3600 s) | yes |
+| `unverified` | `--naming replace` only: `photo.webp` with no `photo.jpg/.jpeg/.png` next to it | **never** |
+
+```bash
+# 1. Review (changes nothing)
+wp-imgopt /var/www/site/wp-content/uploads --find-orphans
+
+# 2. Remove orphans and stale temp files, keep a JSON record of what was removed
+wp-imgopt /var/www/site/wp-content/uploads --find-orphans --delete \
+    --json-report /var/log/wp-imgopt-orphans.json
+```
+
+With `--naming replace`, a lone `photo.webp` could be a file an editor uploaded on purpose,
+so those are only listed. `--exclude`, `--backup-dir` (skipped) and `-n/--dry-run` (which
+wins over `--delete`) work as in a normal run. Exit code is `1` if any file could not be
+removed.
 
 ## Safety notes
 
