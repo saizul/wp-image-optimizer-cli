@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `--find-orphans` mode that reports `.webp` / `.avif` files whose source image was
+  deleted, plus stale temp files from interrupted runs; `--delete` removes them, and
+  `--json-report` records the result. With `--naming replace`, unmatched files are only
+  reported as `unverified` and never deleted, since they may be real uploads.
+- `--temp-min-age` to control when a leftover temp file counts as stale.
+
 ### Fixed
 - `--json-report` creates missing parent folders and checks the path before processing starts, so a bad path exits with code 2 and a message instead of a traceback after a long run.
 

@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from rich.table import Table
 
-from wp_imgopt import __version__, sqlreplace
+from wp_imgopt import __version__, orphans, sqlreplace
 from wp_imgopt.optimizer import OptimizerError, run
 from wp_imgopt.options import NAMING_APPEND, NAMING_REPLACE, Options
 from wp_imgopt.report import Summary, human_bytes
@@ -64,6 +64,25 @@ def build_parser() -> argparse.ArgumentParser:
     srv = p.add_argument_group("server snippets")
     srv.add_argument("--nginx", action="store_true", help="print an nginx snippet and exit")
     srv.add_argument("--htaccess", action="store_true", help="print an .htaccess block and exit")
+
+    orp = p.add_argument_group("orphan cleanup")
+    orp.add_argument(
+        "--find-orphans",
+        action="store_true",
+        help="list .webp/.avif files whose source image was deleted, plus stale temp files",
+    )
+    orp.add_argument(
+        "--delete",
+        action="store_true",
+        help="with --find-orphans: actually remove the deletable files",
+    )
+    orp.add_argument(
+        "--temp-min-age",
+        type=int,
+        default=orphans.DEFAULT_TEMP_MIN_AGE,
+        metavar="SECONDS",
+        help="only report temp files older than this (3600)",
+    )
 
     sql = p.add_argument_group("WP-CLI search-replace")
     sql.add_argument("--sql-replace", action="store_true", help="print wp search-replace commands")
@@ -129,6 +148,72 @@ def _read_entries(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8").splitlines()
 
 
+def _write_json(path: Path, payload: dict, err: Console) -> bool:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        err.print(
+            f"[red]error:[/red] cannot write --json-report {path}: {exc.strerror}",
+            highlight=False,
+        )
+        return False
+    return True
+
+
+def run_find_orphans(args: argparse.Namespace, out: Console, err: Console) -> int:
+    if args.temp_min_age < 0:
+        err.print("[red]error:[/red] --temp-min-age must not be negative", highlight=False)
+        return 2
+    try:
+        report = orphans.find_orphans(
+            args.root,
+            args.naming,
+            exclude=tuple(args.exclude),
+            backup_dir=args.backup_dir,
+            temp_min_age=args.temp_min_age,
+        )
+    except NotADirectoryError as exc:
+        err.print(f"[red]error:[/red] {exc}", highlight=False)
+        return 2
+    if args.delete and not args.dry_run:
+        orphans.delete_orphans(args.root, report)
+
+    if args.json_report and not _write_json(args.json_report, report.to_dict(), err):
+        return 2
+
+    if not args.quiet:
+        labels = {
+            orphans.ORPHAN: "[yellow]orphan[/yellow]",
+            orphans.UNVERIFIED: "[cyan]unverified[/cyan]",
+            orphans.STALE_TEMP: "[magenta]stale-temp[/magenta]",
+        }
+        deleted = set(report.deleted)
+        for item in report.items:
+            mark = " [green](deleted)[/green]" if item.rel in deleted else ""
+            out.print(
+                f"{labels[item.kind]} {item.rel} ({human_bytes(item.size)}){mark}",
+                highlight=False,
+            )
+        d = report.to_dict()
+        verb = "removed" if report.deleted else "reclaimable"
+        out.print(
+            f"{d['orphans']} orphan(s), {d['stale_temp']} stale temp file(s), "
+            f"{d['unverified']} unverified; {human_bytes(report.reclaimable_bytes)} {verb}",
+            highlight=False,
+        )
+        if report.items and not args.delete:
+            out.print("nothing deleted; re-run with --delete to remove them", highlight=False)
+        if d["unverified"]:
+            out.print(
+                "unverified files may be WebP/AVIF uploads and are never deleted automatically",
+                highlight=False,
+            )
+    for rel, message in report.failed:
+        err.print(f"[red]error[/red] could not delete {rel}: {message}", highlight=False)
+    return 1 if report.failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -146,6 +231,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.root is None:
         parser.error("ROOT is required (or use --nginx / --htaccess)")
+
+    if args.delete and not args.find_orphans:
+        parser.error("--delete only works together with --find-orphans")
+    if args.find_orphans:
+        if args.sql_replace:
+            parser.error("--find-orphans cannot be combined with --sql-replace")
+        return run_find_orphans(args, out, err)
 
     if args.sql_replace:
         if not args.site_url:
